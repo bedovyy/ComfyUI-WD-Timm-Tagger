@@ -130,10 +130,12 @@ class WDTimmTagger:
 
         def process_category(probs, indices, threshold):
             subset = {self.labels.names[i]: probs[i].item() for i in indices
-                  if probs[i] > threshold and self.labels.names[i] not in exclude}
+                  if probs[i] > threshold and self.labels.names[i]}
             return dict(sorted(subset.items(), key=lambda x: x[1], reverse=True))
 
-        exclude = {s.strip() for s in exclude_tags.lower().split(",")}
+        def normalize(name: str) -> str:
+            return name.replace("_", " ").replace("(", "\\(").replace(")", "\\)")
+
         exclude = {s.strip() for s in exclude_tags.lower().split(",") if s.strip()}
         results, raws = [], []
         for batch in torch.split(inputs, batch_size):
@@ -147,8 +149,7 @@ class WDTimmTagger:
                 general = process_category(probs_np, self.labels.general, general_threshold)
                 top_rating = [max(ratings, key=ratings.get)] if add_rating else []
                 combined_tags = top_rating + list(character.keys()) + list(general.keys())
-                caption = ", ".join(combined_tags)
-                taglist = caption.replace("_", " ").replace("(", "\\(").replace(")", "\\)")
+                taglist = ", ".join(normalized for t in combined_tags if (normalized := normalize(t)) not in exclude)
                 results.append(taglist + (", " if taglist else ""))
                 raws.append({"ratings": ratings, "character": character, "general": general})
 
