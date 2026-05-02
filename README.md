@@ -2,6 +2,9 @@
 
 ComfyUI custom node for image tagging using WD v3 models, based on `timm`.
 
+<img width="1655" height="673" alt="image" src="https://github.com/user-attachments/assets/ded512b3-0272-4e14-bf76-eb2719c0ad2a" />
+
+
 ## Installation
 
 1. Clone this repo into `ComfyUI/custom_nodes/`
