@@ -41,6 +41,7 @@ def load_labels(path) -> LabelData:
 
 
 MODEL_REPOS = [
+    "Bedovyy/pixai-tagger-v0.9-timm",
     "SmilingWolf/wd-eva02-large-tagger-v3",
     "SmilingWolf/wd-vit-large-tagger-v3",
     "SmilingWolf/wd-vit-tagger-v3",
