@@ -147,7 +147,7 @@ class WDTimmTagger:
                 ratings = {self.labels.names[i]: probs_np[i].item() for i in self.labels.rating}
                 character = process_category(probs_np, self.labels.character, character_threshold)
                 general = process_category(probs_np, self.labels.general, general_threshold)
-                top_rating = [max(ratings, key=ratings.get)] if add_rating else []
+                top_rating = [max(ratings, key=ratings.get)] if add_rating and ratings else []
                 combined_tags = top_rating + list(character.keys()) + list(general.keys())
                 taglist = ", ".join(normalized for t in combined_tags if (normalized := normalize(t)) not in exclude)
                 results.append(taglist + (", " if taglist else ""))
