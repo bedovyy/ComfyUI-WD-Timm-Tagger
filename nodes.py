@@ -123,6 +123,7 @@ class WDTimmTagger:
         mean = torch.tensor(self.config["mean"]).view(1, 3, 1, 1)
         std  = torch.tensor(self.config["std"]).view(1, 3, 1, 1)
         inputs = (inputs - mean) / std
+        inputs = inputs[:, [2, 1, 0]]  # RGB → BGR
 
         required_mem = batch_size * int(np.prod(self.config["input_size"])) * 4 * 8
         model_management.free_memory(required_mem, device, keep_loaded=[self.model_patcher])
