@@ -17,6 +17,8 @@ import logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("timm").setLevel(logging.WARNING)
 
+PADDING=False
+
 # ------------------------------------------------------------------
 # Reference: Original code from https://github.com/neggles/wdv3-timm
 # ------------------------------------------------------------------
@@ -41,12 +43,12 @@ def load_labels(path) -> LabelData:
 
 
 MODEL_REPOS = [
-    "Bedovyy/pixai-tagger-v0.9-timm",
     "SmilingWolf/wd-eva02-large-tagger-v3",
     "SmilingWolf/wd-vit-large-tagger-v3",
     "SmilingWolf/wd-vit-tagger-v3",
     "SmilingWolf/wd-swinv2-tagger-v3",
     "SmilingWolf/wd-convnext-tagger-v3",
+    "Bedovyy/pixai-tagger-v0.9-timm",
 ]
 REPO_NAMES = {repo.split("/")[-1]: repo for repo in MODEL_REPOS}
 WD_TAGGER_DIR = os.path.join(folder_paths.models_dir, "wd_taggers")
@@ -111,14 +113,19 @@ class WDTimmTagger:
         img_tensor = image.permute(0, 3, 1, 2)  # [B, C, H, W]
         B, C, H, W = img_tensor.shape
         _, target_h, target_w = self.config["input_size"]
-        scale = min(target_w / W, target_h / H)
-        new_w, new_h = int(W * scale), int(H * scale)
+        if not PADDING:
+            inputs = F.interpolate(img_tensor, size=(target_h, target_w), mode="bicubic", align_corners=False)
+        else:
+            scale = min(target_w / W, target_h / H)
+            new_w, new_h = int(W * scale), int(H * scale)
 
-        resized = F.interpolate(img_tensor, size=(new_h, new_w), mode=self.config["interpolation"], align_corners=False)
-        inputs = torch.ones((B, C, target_h, target_w))
-        pad_y, pad_x = (target_h - new_h) // 2, (target_w - new_w) // 2
-        inputs[:, :, pad_y:pad_y+new_h, pad_x:pad_x+new_w] = resized
-        del resized
+            resized = F.interpolate(
+                img_tensor, size=(new_h, new_w), mode=self.config["interpolation"], align_corners=False
+            )
+            inputs = torch.ones((B, C, target_h, target_w))
+            pad_y, pad_x = (target_h - new_h) // 2, (target_w - new_w) // 2
+            inputs[:, :, pad_y:pad_y+new_h, pad_x:pad_x+new_w] = resized
+            del resized
 
         mean = torch.tensor(self.config["mean"]).view(1, 3, 1, 1)
         std  = torch.tensor(self.config["std"]).view(1, 3, 1, 1)
