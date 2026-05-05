@@ -17,7 +17,7 @@ import logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("timm").setLevel(logging.WARNING)
 
-PADDING=False
+PADDING=True
 
 # ------------------------------------------------------------------
 # Reference: Original code from https://github.com/neggles/wdv3-timm
@@ -113,7 +113,7 @@ class WDTimmTagger:
         img_tensor = image.permute(0, 3, 1, 2)  # [B, C, H, W]
         B, C, H, W = img_tensor.shape
         _, target_h, target_w = self.config["input_size"]
-        if not PADDING:
+        if not PADDING or "pixai-tagger-v0.9-timm" in model_name:
             inputs = F.interpolate(img_tensor, size=(target_h, target_w), mode="bicubic", align_corners=False)
         else:
             scale = min(target_w / W, target_h / H)
