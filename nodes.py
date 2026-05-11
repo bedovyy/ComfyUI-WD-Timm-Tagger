@@ -1,5 +1,6 @@
 import csv
 import fnmatch
+import json
 import os
 from typing import NamedTuple
 
@@ -18,7 +19,6 @@ import logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("timm").setLevel(logging.WARNING)
 
-PADDING=True
 
 # ------------------------------------------------------------------
 # Reference: Original code from https://github.com/neggles/wdv3-timm
@@ -42,7 +42,7 @@ def load_labels(path) -> LabelData:
         character=[i for i, c in enumerate(categories) if c == 4],
     )
 
-
+DTYPE_MAP = {"auto": None, "bf16": torch.bfloat16, "fp16": torch.float16}
 MODEL_REPOS = [
     "SmilingWolf/wd-eva02-large-tagger-v3",
     "SmilingWolf/wd-vit-large-tagger-v3",
@@ -50,8 +50,9 @@ MODEL_REPOS = [
     "SmilingWolf/wd-swinv2-tagger-v3",
     "SmilingWolf/wd-convnext-tagger-v3",
     "Bedovyy/pixai-tagger-v0.9-timm",
-#    "Grio43/OppaiOracle",
+    "Bedovyy/OppaiOracle-V1.1-timm",
 ]
+
 REPO_NAMES = {repo.split("/")[-1]: repo for repo in MODEL_REPOS}
 WD_TAGGER_DIR = os.path.join(folder_paths.models_dir, "wd_taggers")
 
@@ -59,13 +60,23 @@ def get_model_list() -> list[str]:
     local = set(os.listdir(WD_TAGGER_DIR)) if os.path.isdir(WD_TAGGER_DIR) else set()
     return list(REPO_NAMES) + sorted(local - REPO_NAMES.keys())
 
+def parse_notes(pretrained_cfg: dict) -> dict:
+    for note in pretrained_cfg.get('notes', []):
+        try:
+            return json.loads(note)
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return {}
+
 
 class WDTimmTagger:
     def __init__(self):
         self.model_patcher = None
         self.labels = None
+        self.pad_color = None
         self.config = None
         self.current_model_name = None
+        self.dtype = None
 
     @classmethod
     def INPUT_TYPES(s):
@@ -73,6 +84,7 @@ class WDTimmTagger:
             "required": {
                 "image": ("IMAGE",),
                 "model_name": (get_model_list(), {"default": get_model_list()[0]}),
+                "dtype": (list(DTYPE_MAP.keys()), {"default": "auto"}),
                 "general_threshold": ("FLOAT", {"default": 0.35, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "character_threshold": ("FLOAT", {"default": 0.75, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "add_rating": ("BOOLEAN", {"default": False}),
@@ -92,10 +104,10 @@ class WDTimmTagger:
     FUNCTION = "tag"
     CATEGORY = "image"
 
-    def tag(self, image, model_name, general_threshold, character_threshold, add_rating, exclude_tags, batch_size):
+    def tag(self, image, model_name, dtype, general_threshold, character_threshold, add_rating, exclude_tags, batch_size):
         device = model_management.get_torch_device()
         
-        if self.current_model_name != model_name:
+        if self.current_model_name != model_name or self.dtype != dtype:
             save_path = os.path.join(WD_TAGGER_DIR, model_name)
             if not os.path.exists(os.path.join(save_path, "config.json")):
                 repo_id = REPO_NAMES[model_name]
@@ -107,6 +119,9 @@ class WDTimmTagger:
 
             base_model = timm.create_model(f"local-dir:{save_path}").eval()
             state_dict = load_file(os.path.join(save_path, "model.safetensors"))
+            self.dtype = dtype
+            dtype_to = DTYPE_MAP[dtype] or next(iter(state_dict.values())).dtype
+            base_model = base_model.to(dtype_to)
             base_model.load_state_dict(state_dict)
             self.model_patcher = ModelPatcher(
                 base_model,
@@ -115,22 +130,26 @@ class WDTimmTagger:
             )
             self.labels = load_labels(save_path)
             self.config = timm.data.resolve_data_config(base_model.pretrained_cfg, model=base_model)
+            meta = parse_notes(base_model.pretrained_cfg)
+            pad = meta.get("pad_color", 255)
+            self.pad_color = None if pad is None else pad / 255.0
             self.current_model_name = model_name
 
         # resize then padding
         img_tensor = image.permute(0, 3, 1, 2)  # [B, C, H, W]
         B, C, H, W = img_tensor.shape
         _, target_h, target_w = self.config["input_size"]
-        if not PADDING or "pixai-tagger-v0.9-timm" in model_name:
+
+        if self.pad_color is None:
             inputs = F.interpolate(img_tensor, size=(target_h, target_w), mode="bicubic", align_corners=False)
         else:
-            scale = min(target_w / W, target_h / H)
+            scale = min(target_w / W, target_h / H, 1.0)
             new_w, new_h = int(W * scale), int(H * scale)
 
             resized = F.interpolate(
                 img_tensor, size=(new_h, new_w), mode=self.config["interpolation"], align_corners=False
             )
-            inputs = torch.ones((B, C, target_h, target_w))
+            inputs = torch.full((B, C, target_h, target_w), self.pad_color)
             pad_y, pad_x = (target_h - new_h) // 2, (target_w - new_w) // 2
             inputs[:, :, pad_y:pad_y+new_h, pad_x:pad_x+new_w] = resized
             del resized
@@ -154,12 +173,13 @@ class WDTimmTagger:
 
         exclude_patterns = [s.strip() for s in exclude_tags.lower().split(",") if s.strip()]
         results, raws = [], []
+        model_dtype = next(self.model_patcher.model.parameters()).dtype
         for batch in torch.split(inputs, batch_size):
             with torch.inference_mode():
-                batch_probs = F.sigmoid(self.model_patcher.model(batch.to(device))).cpu()
+                batch_probs = F.sigmoid(self.model_patcher.model(batch.to(device=device, dtype=model_dtype))).cpu()
 
             for probs in batch_probs:
-                probs_np = probs.numpy()
+                probs_np = probs.to(torch.float32).numpy()
                 ratings = {self.labels.names[i]: probs_np[i].item() for i in self.labels.rating}
                 character = process_category(probs_np, self.labels.character, character_threshold)
                 general = process_category(probs_np, self.labels.general, general_threshold)
