@@ -1,4 +1,5 @@
 import csv
+import fnmatch
 import os
 from typing import NamedTuple
 
@@ -49,6 +50,7 @@ MODEL_REPOS = [
     "SmilingWolf/wd-swinv2-tagger-v3",
     "SmilingWolf/wd-convnext-tagger-v3",
     "Bedovyy/pixai-tagger-v0.9-timm",
+#    "Grio43/OppaiOracle",
 ]
 REPO_NAMES = {repo.split("/")[-1]: repo for repo in MODEL_REPOS}
 WD_TAGGER_DIR = os.path.join(folder_paths.models_dir, "wd_taggers")
@@ -74,8 +76,14 @@ class WDTimmTagger:
                 "general_threshold": ("FLOAT", {"default": 0.35, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "character_threshold": ("FLOAT", {"default": 0.75, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "add_rating": ("BOOLEAN", {"default": False}),
-                "exclude_tags": ("STRING", {"default": ""}),
-                "batch_size": ("INT", {"default": 4, "min": 1, "max": 32}),
+                "exclude_tags": ("STRING", {
+                    "default": "",
+                    "tooltip": "Exclude tags via comma separation. Glob patterns supported.",
+                }),
+                "batch_size": ("INT", {
+                    "default": 4, "min": 1, "max": 32,
+                    "tooltip": "Only effective when processing image batches.",
+                }),
             }
         }
     OUTPUT_IS_LIST = (True,True)
@@ -144,7 +152,7 @@ class WDTimmTagger:
         def normalize(name: str) -> str:
             return name.replace("_", " ").replace("(", "\\(").replace(")", "\\)")
 
-        exclude = {s.strip() for s in exclude_tags.lower().split(",") if s.strip()}
+        exclude_patterns = [s.strip() for s in exclude_tags.lower().split(",") if s.strip()]
         results, raws = [], []
         for batch in torch.split(inputs, batch_size):
             with torch.inference_mode():
@@ -157,7 +165,8 @@ class WDTimmTagger:
                 general = process_category(probs_np, self.labels.general, general_threshold)
                 top_rating = [max(ratings, key=ratings.get)] if add_rating and ratings else []
                 combined_tags = top_rating + list(character.keys()) + list(general.keys())
-                taglist = ", ".join(normalized for t in combined_tags if (normalized := normalize(t)) not in exclude)
+                is_excluded = lambda n: any(fnmatch.fnmatchcase(n, p) for p in exclude_patterns)
+                taglist = ", ".join(nt for t in combined_tags if (nt := normalize(t)) and not is_excluded(nt))
                 results.append(taglist + (", " if taglist else ""))
                 raws.append({"ratings": ratings, "character": character, "general": general})
 
