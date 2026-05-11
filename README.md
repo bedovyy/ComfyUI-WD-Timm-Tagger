@@ -27,13 +27,15 @@ Tested on 291 images with RTX 5090, `wd-eva02-large-tagger-v3` model.
 
 Models are automatically downloaded to `models/wd_taggers/` on first use.
 
-| Model | Repo |
-|-------|------|
-| eva02 | [SmilingWolf/wd-eva02-large-tagger-v3](https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3) |
-| vit-large | [SmilingWolf/wd-vit-large-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-large-tagger-v3) |
-| vit | [SmilingWolf/wd-vit-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) |
-| swinv2 | [SmilingWolf/wd-swinv2-tagger-v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3) |
-| convnext | [SmilingWolf/wd-convnext-tagger-v3](https://huggingface.co/SmilingWolf/wd-convnext-tagger-v3) |
+| Model                                                      | Original Repo                                                                                       |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| eva02                                                      | [SmilingWolf/wd-eva02-large-tagger-v3](https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3) |
+| vit-large                                                  | [SmilingWolf/wd-vit-large-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-large-tagger-v3)     |
+| vit                                                        | [SmilingWolf/wd-vit-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3)                 |
+| swinv2                                                     | [SmilingWolf/wd-swinv2-tagger-v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3)           |
+| convnext                                                   | [SmilingWolf/wd-convnext-tagger-v3](https://huggingface.co/SmilingWolf/wd-convnext-tagger-v3)       |
+| [pixai-tagger-v0.9](https://huggingface.co/Bedovyy/pixai-tagger-v0.9-timm) | [pixai-labs/pixai-tagger-v0.9](https://huggingface.co/pixai-labs/pixai-tagger-v0.9) |
+| [OppaiOracle-V1.1](https://huggingface.co/Bedovyy/OppaiOracle-V1.1-timm)   | [Grio43/OppaiOracle](https://huggingface.co/Grio43/OppaiOracle)                     |
 
 You can also place your own model folders under `models/wd_taggers/` and they will appear in the model list automatically.
 
@@ -43,6 +45,7 @@ You can also place your own model folders under `models/wd_taggers/` and they wi
 |------|------|-------------|
 | `image` | IMAGE | Input image(s) |
 | `model_name` | COMBO | Model to use |
+| `dtype` | COMBO | Model precision (auto / bf16 / fp16) |
 | `general_threshold` | FLOAT | Confidence threshold for general tags (default: 0.35) |
 | `character_threshold` | FLOAT | Confidence threshold for character tags (default: 0.75) |
 | `add_rating` | BOOLEAN | Prepend rating tag to output |
