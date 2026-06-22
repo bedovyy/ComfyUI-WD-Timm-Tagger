@@ -1,0 +1,18 @@
+[project]
+name = "ComfyUI-WD-Timm-Tagger"
+description = "WD Tagger node for ComfyUI using timm"
+version = "1.0.0" # Custom Node version. Must be semantically versioned.
+license = { file = "LICENSE" }
+dependencies  = [
+  "timm>=1.0.0",
+  "huggingface_hub>=0.23.0"
+] # Filled in from requirements.txt
+
+[project.urls]
+Repository = "https://github.com/bedovyy/ComfyUI-WD-Timm-Tagger"
+"Bug Tracker" = "https://github.com/bedovyy/ComfyUI-WD-Timm-Tagger/issues"
+
+[tool.comfy]
+PublisherId = "bedovyy" # TODO (fill in Publisher ID from Comfy Registry Website).
+DisplayName = "ComfyUI-WD-Timm-Tagger" # Display name for the Custom Node. Can be changed later.
+Icon = "https://raw.githubusercontent.com/bedovyy/ComfyUI-WD-Timm-Tagger/main/assets/logo.png" # SVG, PNG, JPG or GIF (MAX. 800x400px)
