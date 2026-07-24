@@ -54,6 +54,8 @@ MODEL_REPOS = [
 ]
 
 REPO_NAMES = {repo.split("/")[-1]: repo for repo in MODEL_REPOS}
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+JSON_PATH = os.path.join(CURRENT_DIR, "model_list.json")
 WD_TAGGER_DIR = os.path.join(folder_paths.models_dir, "wd_taggers")
 
 def get_model_list() -> list[str]:
@@ -117,12 +119,13 @@ class WDTimmTagger:
                     allow_patterns=["model.safetensors", "config.json", "selected_tags.csv"],
                 )
 
-            base_model = timm.create_model(f"local-dir:{save_path}").eval()
+            base_model = timm.create_model(f"local-dir:{save_path}", scriptable=False).eval()
             state_dict = load_file(os.path.join(save_path, "model.safetensors"))
             self.dtype = dtype
             dtype_to = DTYPE_MAP[dtype] or next(iter(state_dict.values())).dtype
-            base_model = base_model.to(dtype_to)
             base_model.load_state_dict(state_dict)
+            base_model = base_model.to(dtype_to)
+
             self.model_patcher = ModelPatcher(
                 base_model,
                 load_device=device,
@@ -176,10 +179,12 @@ class WDTimmTagger:
         model_dtype = next(self.model_patcher.model.parameters()).dtype
         for batch in torch.split(inputs, batch_size):
             with torch.inference_mode():
-                batch_probs = F.sigmoid(self.model_patcher.model(batch.to(device=device, dtype=model_dtype))).cpu()
+                logits = self.model_patcher.model(batch.to(device=device, dtype=model_dtype))
+                assert torch.isfinite(logits).all(), "non-finite logits"
+                batch_probs = F.sigmoid(logits.to(torch.float32)).cpu()
 
             for probs in batch_probs:
-                probs_np = probs.to(torch.float32).numpy()
+                probs_np = probs.numpy()
                 ratings = {self.labels.names[i]: probs_np[i].item() for i in self.labels.rating}
                 character = process_category(probs_np, self.labels.character, character_threshold)
                 general = process_category(probs_np, self.labels.general, general_threshold)
