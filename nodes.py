@@ -25,21 +25,24 @@ logging.getLogger("timm").setLevel(logging.WARNING)
 # ------------------------------------------------------------------
 class LabelData(NamedTuple):
     names: list[str]
-    rating: list[int]
-    general: list[int]
-    character: list[int]
+    rating: np.ndarray
+    general: np.ndarray
+    character: np.ndarray
+    best_threshold: np.ndarray
 
 def load_labels(path) -> LabelData:
     with open(os.path.join(path, "selected_tags.csv")) as f:
         rows = list(csv.DictReader(f))
     names = [r["name"] for r in rows]
-    categories  = [int(r["category"]) for r in rows]
+    categories = np.array([int(r["category"]) for r in rows])
+    best_threshold = np.array([float(r.get("best_threshold", 0.0)) for r in rows], dtype=np.float32)
 
     return LabelData(
         names=names,
-        rating=[i for i, c in enumerate(categories) if c == 9],
-        general=[i for i, c in enumerate(categories) if c == 0],
-        character=[i for i, c in enumerate(categories) if c == 4],
+        rating=np.where(categories == 9)[0],
+        general=np.where(categories == 0)[0],
+        character=np.where(categories == 4)[0],
+        best_threshold=best_threshold,
     )
 
 DTYPE_MAP = {"auto": None, "bf16": torch.bfloat16, "fp16": torch.float16}
@@ -55,7 +58,6 @@ MODEL_REPOS = [
 
 REPO_NAMES = {repo.split("/")[-1]: repo for repo in MODEL_REPOS}
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-JSON_PATH = os.path.join(CURRENT_DIR, "model_list.json")
 WD_TAGGER_DIR = os.path.join(folder_paths.models_dir, "wd_taggers")
 
 def get_model_list() -> list[str]:
@@ -76,6 +78,7 @@ class WDTimmTagger:
         self.model_patcher = None
         self.labels = None
         self.pad_color = None
+        self.color_space = None
         self.config = None
         self.current_model_name = None
         self.dtype = None
@@ -116,7 +119,7 @@ class WDTimmTagger:
                 snapshot_download(
                     repo_id=repo_id,
                     local_dir=save_path,
-                    allow_patterns=["model.safetensors", "config.json", "selected_tags.csv"],
+                    allow_patterns=["model.safetensors", "config.json", "selected_tags.csv", "preprocess.json"],
                 )
 
             base_model = timm.create_model(f"local-dir:{save_path}", scriptable=False).eval()
@@ -136,6 +139,8 @@ class WDTimmTagger:
             meta = parse_notes(base_model.pretrained_cfg)
             pad = meta.get("pad_color", 255)
             self.pad_color = None if pad is None else pad / 255.0
+            #TODO: use imgutils or parse json
+            self.color_space = "RGB" if os.path.exists(os.path.join(save_path, "preprocess.json")) else "BGR"
             self.current_model_name = model_name
 
         # resize then padding
@@ -160,15 +165,17 @@ class WDTimmTagger:
         mean = torch.tensor(self.config["mean"]).view(1, 3, 1, 1)
         std  = torch.tensor(self.config["std"]).view(1, 3, 1, 1)
         inputs = (inputs - mean) / std
-        inputs = inputs[:, [2, 1, 0]]  # RGB → BGR
+        if self.color_space == "BGR":
+            inputs = inputs[:, [2, 1, 0]]  # RGB → BGR
 
         required_mem = batch_size * int(np.prod(self.config["input_size"])) * 4 * 8
         model_management.free_memory(required_mem, device, keep_loaded=[self.model_patcher])
         model_management.load_model_gpu(self.model_patcher)
 
         def process_category(probs, indices, threshold):
-            subset = {self.labels.names[i]: probs[i].item() for i in indices
-                  if probs[i] > threshold and self.labels.names[i]}
+            effective_threshold = np.maximum(self.labels.best_threshold[indices], threshold)
+            subset = {self.labels.names[i]: probs[i].item() for i, thr in zip(indices, effective_threshold)
+                if probs[i] > thr and self.labels.names[i]}
             return dict(sorted(subset.items(), key=lambda x: x[1], reverse=True))
 
         def normalize(name: str) -> str:
@@ -177,10 +184,12 @@ class WDTimmTagger:
         exclude_patterns = [s.strip() for s in exclude_tags.lower().split(",") if s.strip()]
         results, raws = [], []
         model_dtype = next(self.model_patcher.model.parameters()).dtype
+        ac_dtype = torch.float16 if model_dtype == torch.float16 else None
         for batch in torch.split(inputs, batch_size):
             with torch.inference_mode():
-                logits = self.model_patcher.model(batch.to(device=device, dtype=model_dtype))
-                assert torch.isfinite(logits).all(), "non-finite logits"
+                with torch.autocast(device_type=device.type, dtype=ac_dtype, enabled=(ac_dtype is not None)):
+                    logits = self.model_patcher.model(batch.to(device=device, dtype=model_dtype))
+                assert torch.isfinite(logits).all(), (f"dtype {model_dtype} produced NaN/Inf. Please try other dtypes.")
                 batch_probs = F.sigmoid(logits.to(torch.float32)).cpu()
 
             for probs in batch_probs:
@@ -190,7 +199,8 @@ class WDTimmTagger:
                 general = process_category(probs_np, self.labels.general, general_threshold)
                 top_rating = [max(ratings, key=ratings.get)] if add_rating and ratings else []
                 combined_tags = top_rating + list(character.keys()) + list(general.keys())
-                is_excluded = lambda n: any(fnmatch.fnmatchcase(n, p) for p in exclude_patterns)
+                def is_excluded(n):
+                    return any(fnmatch.fnmatchcase(n, p) for p in exclude_patterns)
                 taglist = ", ".join(nt for t in combined_tags if (nt := normalize(t)) and not is_excluded(nt))
                 results.append(taglist + (", " if taglist else ""))
                 raws.append({"ratings": ratings, "character": character, "general": general})
