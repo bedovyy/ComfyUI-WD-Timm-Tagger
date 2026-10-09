@@ -1,7 +1,10 @@
 import csv
 import fnmatch
+import hashlib
+import importlib
 import json
 import os
+import sys
 from typing import NamedTuple
 
 import numpy as np
@@ -40,8 +43,8 @@ def load_labels(path) -> LabelData:
     return LabelData(
         names=names,
         rating=np.where(categories == 9)[0],
-        general=np.where(categories == 0)[0],
-        character=np.where(categories == 4)[0],
+        general=np.where(np.isin(categories, [0, 1, 5]))[0],
+        character=np.where(np.isin(categories, [3, 4]))[0],
         best_threshold=best_threshold,
     )
 
@@ -52,6 +55,7 @@ MODEL_REPOS = [
     "SmilingWolf/wd-vit-tagger-v3",
     "SmilingWolf/wd-swinv2-tagger-v3",
     "SmilingWolf/wd-convnext-tagger-v3",
+    "Bedovyy/pixai-tagger-v1.0-timm",
     "Bedovyy/pixai-tagger-v0.9-timm",
     "Bedovyy/OppaiOracle-V1.1-timm",
 ]
@@ -72,6 +76,27 @@ def parse_notes(pretrained_cfg: dict) -> dict:
             continue
     return {}
 
+ARCH_FILE = "timm_arch.py"
+_loaded = set()
+
+def load_custom_arch(save_path):
+    py = os.path.realpath(os.path.join(save_path, ARCH_FILE))
+    if not os.path.isfile(py) or py in _loaded:
+        return
+    name = "timm_arch_" + hashlib.md5(py.encode()).hexdigest()[:8]
+    spec = importlib.util.spec_from_file_location(name, py)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    _loaded.add(py)
+
+def cast_keep_complex(module: torch.nn.Module, dtype) -> torch.nn.Module:
+    if dtype is None:
+        return module
+    for tensor in list(module.parameters()) + list(module.buffers()):
+        if not torch.is_complex(tensor):
+            tensor.data = tensor.data.to(dtype)
+    return module
 
 class WDTimmTagger:
     def __init__(self):
@@ -79,6 +104,7 @@ class WDTimmTagger:
         self.labels = None
         self.pad_color = None
         self.color_space = None
+        self.antialias = False
         self.config = None
         self.current_model_name = None
         self.dtype = None
@@ -119,15 +145,16 @@ class WDTimmTagger:
                 snapshot_download(
                     repo_id=repo_id,
                     local_dir=save_path,
-                    allow_patterns=["model.safetensors", "config.json", "selected_tags.csv", "preprocess.json"],
+                    allow_patterns=["model.safetensors", "config.json", "selected_tags.csv", "preprocess.json", ARCH_FILE],
                 )
 
+            load_custom_arch(save_path)
             base_model = timm.create_model(f"local-dir:{save_path}", scriptable=False).eval()
             state_dict = load_file(os.path.join(save_path, "model.safetensors"))
             self.dtype = dtype
             dtype_to = DTYPE_MAP[dtype] or next(iter(state_dict.values())).dtype
             base_model.load_state_dict(state_dict)
-            base_model = base_model.to(dtype_to)
+            base_model = cast_keep_complex(base_model, dtype_to)
 
             self.model_patcher = ModelPatcher(
                 base_model,
@@ -139,8 +166,10 @@ class WDTimmTagger:
             meta = parse_notes(base_model.pretrained_cfg)
             pad = meta.get("pad_color", 255)
             self.pad_color = None if pad is None else pad / 255.0
-            #TODO: use imgutils or parse json
-            self.color_space = "RGB" if os.path.exists(os.path.join(save_path, "preprocess.json")) else "BGR"
+            self.antialias = bool(meta.get("antialias", False))
+            self.color_space = meta.get("color_space") or (
+                "RGB" if os.path.exists(os.path.join(save_path, "preprocess.json")) else "BGR"
+            )
             self.current_model_name = model_name
 
         # resize then padding
@@ -148,14 +177,18 @@ class WDTimmTagger:
         B, C, H, W = img_tensor.shape
         _, target_h, target_w = self.config["input_size"]
 
+        interp_kwargs = {"align_corners": False}
+        if self.antialias:
+            interp_kwargs["antialias"] = True
+
         if self.pad_color is None:
-            inputs = F.interpolate(img_tensor, size=(target_h, target_w), mode="bicubic", align_corners=False)
+            inputs = F.interpolate(img_tensor, size=(target_h, target_w), mode="bicubic", **interp_kwargs)
         else:
-            scale = min(target_w / W, target_h / H, 1.0)
+            scale = min(target_w / W, target_h / H)
             new_w, new_h = int(W * scale), int(H * scale)
 
             resized = F.interpolate(
-                img_tensor, size=(new_h, new_w), mode=self.config["interpolation"], align_corners=False
+                img_tensor, size=(new_h, new_w), mode=self.config["interpolation"], **interp_kwargs
             )
             inputs = torch.full((B, C, target_h, target_w), self.pad_color)
             pad_y, pad_x = (target_h - new_h) // 2, (target_w - new_w) // 2

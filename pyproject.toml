@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-WD-Timm-Tagger"
 description = "WD Tagger node for ComfyUI using timm"
-version = "1.0.0" # Custom Node version. Must be semantically versioned.
+version = "1.0.1" # Custom Node version. Must be semantically versioned.
 license = { file = "LICENSE" }
 dependencies  = [
   "timm>=1.0.0",
