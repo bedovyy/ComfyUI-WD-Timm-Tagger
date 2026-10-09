@@ -34,6 +34,7 @@ Models are automatically downloaded to `models/wd_taggers/` on first use.
 | vit                                                        | [SmilingWolf/wd-vit-tagger-v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3)                 |
 | swinv2                                                     | [SmilingWolf/wd-swinv2-tagger-v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3)           |
 | convnext                                                   | [SmilingWolf/wd-convnext-tagger-v3](https://huggingface.co/SmilingWolf/wd-convnext-tagger-v3)       |
+| [pixai-tagger-v1.0](https://huggingface.co/Bedovyy/pixai-tagger-v1.0-timm) | [pixai-labs/pixai-tagger-v1.0](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) |
 | [pixai-tagger-v0.9](https://huggingface.co/Bedovyy/pixai-tagger-v0.9-timm) | [pixai-labs/pixai-tagger-v0.9](https://huggingface.co/pixai-labs/pixai-tagger-v0.9) |
 | [OppaiOracle-V1.1](https://huggingface.co/Bedovyy/OppaiOracle-V1.1-timm)   | [Grio43/OppaiOracle](https://huggingface.co/Grio43/OppaiOracle)                     |
 
